@@ -1,0 +1,255 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <SPI.h>
+#include <Ethernet.h>
+
+/* ==================================================
+   LCD
+================================================== */
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+/* ==================================================
+   FLYING FISH SENSORS
+
+   LOW  = obstacle detected
+   HIGH = clear
+================================================== */
+const int sensorIn  = 8;
+const int sensorOut = 9;
+
+/* ==================================================
+   COUNTERS
+================================================== */
+int entered = 0;
+int exited = 0;
+int currentPeople = 0;
+
+/* ==================================================
+   STATE MACHINE
+
+   0 = idle
+   1 = IN triggered first
+   2 = OUT triggered first
+================================================== */
+int state = 0;
+
+/* ==================================================
+   TIMERS
+================================================== */
+unsigned long lastTrigger = 0;
+
+const unsigned long sequenceTimeout = 1500;
+const unsigned long sensorCooldown  = 800;
+
+unsigned long lastInTime  = 0;
+unsigned long lastOutTime = 0;
+
+/* ==================================================
+   ETHERNET
+================================================== */
+byte mac[] = {
+  0x90, 0xA2, 0xDA, 0x11, 0x14, 0xE9
+};
+
+IPAddress ip(10, 6, 128, 52);
+
+/* Flask server IP */
+IPAddress server(10, 6, 128, 97);
+
+int port = 5000;
+
+EthernetClient client;
+
+/* ==================================================
+   SETUP
+================================================== */
+void setup() {
+
+  Serial.begin(9600);
+
+  /* LCD */
+  lcd.init();
+  lcd.backlight();
+
+  /* Flying Fish sensors */
+  pinMode(sensorIn, INPUT_PULLUP);
+  pinMode(sensorOut, INPUT_PULLUP);
+
+  /* Ethernet Shield fix */
+  pinMode(4, OUTPUT);
+  digitalWrite(4, HIGH);
+
+  pinMode(10, OUTPUT);
+  digitalWrite(10, HIGH);
+
+  lcd.setCursor(0, 0);
+  lcd.print("Starting ETH...");
+
+  /* Start Ethernet */
+  Ethernet.begin(mac, ip);
+
+  delay(1000);
+
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("ETH READY");
+
+  Serial.print("Arduino IP: ");
+  Serial.println(Ethernet.localIP());
+
+  delay(2000);
+
+  updateDisplay();
+}
+
+/* ==================================================
+   MAIN LOOP
+================================================== */
+void loop() {
+
+  unsigned long now = millis();
+
+  /* Reset state if timeout */
+  if (now - lastTrigger > sequenceTimeout) {
+    state = 0;
+  }
+
+  /* Flying Fish logic */
+  bool inActive  = (digitalRead(sensorIn)  == LOW);
+  bool outActive = (digitalRead(sensorOut) == LOW);
+
+  /* ==================================================
+     IN SENSOR
+  ================================================== */
+  if (inActive && (now - lastInTime > sensorCooldown)) {
+
+    lastInTime = now;
+    lastTrigger = now;
+
+    Serial.println("IN SENSOR");
+
+    if (state == 0) {
+
+      state = 1;
+
+    }
+    else if (state == 2) {
+
+      entered++;
+      currentPeople++;
+
+      state = 0;
+
+      Serial.println("PERSON ENTERED");
+
+      updateDisplay();
+      sendToFlask();
+    }
+  }
+
+  /* ==================================================
+     OUT SENSOR
+  ================================================== */
+  if (outActive && (now - lastOutTime > sensorCooldown)) {
+
+    lastOutTime = now;
+    lastTrigger = now;
+
+    Serial.println("OUT SENSOR");
+
+    if (state == 0) {
+
+      state = 2;
+
+    }
+    else if (state == 1) {
+
+      exited++;
+
+      if (currentPeople > 0) {
+        currentPeople--;
+      }
+
+      state = 0;
+
+      Serial.println("PERSON EXITED");
+
+      updateDisplay();
+      sendToFlask();
+    }
+  }
+}
+
+/* ==================================================
+   LCD DISPLAY
+================================================== */
+void updateDisplay() {
+
+  lcd.clear();
+
+  lcd.setCursor(0, 0);
+  lcd.print("IN : ");
+  lcd.print(entered);
+
+  lcd.setCursor(0, 1);
+  lcd.print("OUT: ");
+  lcd.print(exited);
+
+  lcd.setCursor(0, 2);
+  lcd.print("NOW: ");
+  lcd.print(currentPeople);
+
+  lcd.setCursor(0, 3);
+  lcd.print("SERVER ACTIVE");
+}
+
+/* ==================================================
+   SEND DATA TO FLASK
+================================================== */
+void sendToFlask() {
+
+  Serial.println("Connecting to Flask...");
+
+  if (client.connect(server, port)) {
+
+    Serial.println("Connected");
+
+    /* JSON payload */
+    String payload = "{";
+    payload += "\"entered\":" + String(entered) + ",";
+    payload += "\"exited\":" + String(exited) + ",";
+    payload += "\"current\":" + String(currentPeople);
+    payload += "}";
+
+    /* HTTP POST */
+    client.println("POST /data HTTP/1.1");
+    client.println("Host: 10.6.128.97");
+    client.println("Content-Type: application/json");
+
+    client.print("Content-Length: ");
+    client.println(payload.length());
+
+    client.println();
+    client.println(payload);
+
+    Serial.println("SENT:");
+    Serial.println(payload);
+
+    delay(100);
+
+    /* Read server response */
+    while (client.available()) {
+      char c = client.read();
+      Serial.print(c);
+    }
+
+    client.stop();
+
+    Serial.println();
+    Serial.println("Disconnected");
+  }
+  else {
+
+    Serial.println("Connection FAILED");
+  }
+}

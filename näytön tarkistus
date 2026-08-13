@@ -1,0 +1,14 @@
+Author
+Member
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(12, 11,8,7,6,5);
+
+void setup(){
+lcd.begin(16,2);
+lcd.clear();
+lcd.setCursor(0,0);
+lcd.print("Init fixed");
+lcd.setCursor(0,1);
+lcd.print("Hello 1602");
+}
+void loop(){}

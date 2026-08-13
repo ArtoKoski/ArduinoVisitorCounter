@@ -1,0 +1,42 @@
+
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// LCD 20x4
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+// PIR-pinnit (KUVAN MUKAAN!)
+const int pirInPin  = 13;  // keltainen johto
+const int pirOutPin = 12;  // vihreä johto
+
+void setup() {
+  lcd.init();
+  lcd.backlight();
+
+  pinMode(pirInPin, INPUT_PULLUP);
+  pinMode(pirOutPin, INPUT_PULLUP);
+
+  lcd.setCursor(0, 0);
+  lcd.print("PIR TEST (D12/13)");
+
+  lcd.setCursor(0, 2);
+  lcd.print("IN : ----");
+
+  lcd.setCursor(0, 3);
+  lcd.print("OUT: ----");
+}
+
+void loop() {
+  bool inMotion  = (digitalRead(pirInPin)  == LOW);
+  bool outMotion = (digitalRead(pirOutPin) == LOW);
+
+  lcd.setCursor(5, 2);
+  if (inMotion) lcd.print("MOTION ");
+  else lcd.print("-----  ");
+
+  lcd.setCursor(5, 3);
+  if (outMotion) lcd.print("MOTION ");
+  else lcd.print("-----  ");
+
+  delay(100);
+}
